@@ -1,0 +1,311 @@
+---
+title: "The Classification of Room Occupancy"
+author:
+- Casey Kang
+- caseykan
+date: "Due Monday, July 28, at 11:59PM"
+output:
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+  html_document:
+    code_folding: show
+    theme: cosmo
+    toc: yes
+    toc_float: yes
+---
+
+```{r, include=FALSE}
+###########################
+# STYLE EDITS: IGNORE THIS
+###########################
+knitr::opts_chunk$set(message = FALSE) # include this if you don't want markdown to knit messages
+knitr::opts_chunk$set(warning = FALSE) # include this if you don't want markdown to knit warnings
+knitr::opts_chunk$set(echo = FALSE) # set echo=FALSE to hide code from html output
+```
+
+
+```{r}
+
+set.seed(151)
+library("knitr")
+library("dplyr")
+library("kableExtra")
+library("pander")
+library("readr")
+library("magrittr")
+library("car")
+library("MASS")
+library("klaR")
+library("tree")
+library("rpart")
+library("rpart.plot")
+
+
+```
+
+```{r, echo=FALSE}
+
+# TO BEGIN:
+# 
+# 1) Read the "project2-instructions" on Canvas:
+# https://canvas.cmu.edu/files/12951048/download?download_frd=1
+# 
+# 2) Load the packages by running the previous chunk.
+#
+# 3) To load the possible datasets, run the following:
+
+dress_train <- readr::read_csv("dress_train.csv")
+dress_test <- readr::read_csv("dress_test.csv")
+fertility_train <- readr::read_csv("fertility_train.csv")
+fertility_test <- readr::read_csv("fertility_test.csv")
+occupancy_train <- readr::read_csv("occupancy_train.csv")
+occupancy_test <- readr::read_csv("occupancy_test.csv")
+titanic_train <- readr::read_csv("titanic_train.csv")
+titanic_test <- readr::read_csv("titanic_test.csv")
+
+# 4) Read the corresponding data descriptions
+#    in the "data-story-prompts" on Canvas:
+# https://canvas.cmu.edu/courses/47951/files/folder/project-materials/project2-materials/data-story-prompts
+
+
+```
+
+
+# Introduction
+In modern smart buildings, interpretation for room occupancy is critical for energy efficiency and safety. These data allow for smart HVAC systems to adjust based on occupancy- reducing unnecessary energy consumption. This project examines relationships between predictors and occupancy status, assembles multiple classifiers and finalizes them on a test set to determine the most suitable model.
+
+
+# Exploratory Data Analysis
+
+Background and Variables
+The dataset is from a study accurately detecting occupancy of an office room with variables including light, temperature, humidity and CO2 measurements. The goal of this project is to use these predictors to determine whether the room is occupied (1) or not (0).
+The predictor variables in the dataset are:
+
+- Temperature: the room temperature in Celsius
+
+- Humidity: relative humidity in %
+
+- CO2: the carbon dioxide content of the room in ppm
+
+- Hour: the hour of the day from 0 to 23, with 0 signifying the start of the first hour, and 23 signifying the start of the last hour. Despite being numerical, since theres a specific number of categories (no in-between), this is categorical.
+
+\newpage
+The response variable in the dataset is a binary variable:
+
+- Occupancy: where 1 signifies an occupied room, 0 signifies a vacant room.
+
+## Summary of the Response Labels in the Training Dataset
+
+In the training set, we have 5,700 observations. 4,497 unoccupied rooms comprise of 78.89 percent of the data, with 1,203 occupied rooms comprising of the rest (21.11 percent), as shown in the following tables:
+```{r}
+table(occupancy_train$Occupancy)
+```
+
+```{r}
+prop.table(table(occupancy_train$Occupancy))
+```
+
+##  EDA for Relationships Between Occupancy and Quantiative Predictor variables
+Then, I work toward visualizing relationships between the response (Occupancy) and the various predictors (Temperature, Humidity, CO2 levels, and Hour of the day). This EDA is critical for visually checking whether the quantitative predictors to be useful in helping to classify the occupancy status of the room. I used boxplots:
+
+```{r}
+par(mfrow = c(2, 3), mar = c(4, 4, 2, 1))
+
+# Made boxplots for each quantitative variable grouped by Occupancy
+boxplot(Temperature ~ Occupancy,
+        main = "Temperature",
+        data = occupancy_train,
+        xlab = "Occupancy",
+        ylab = "Degrees Celsius")
+
+boxplot(Humidity ~ Occupancy,
+        main = "Humidity",
+        data = occupancy_train,
+        xlab = "Occupancy",
+        ylab = "Relative %")
+
+boxplot(CO2 ~ Occupancy,
+        main = "CO2",
+        data = occupancy_train,
+        xlab = "Occupancy",
+        ylab = "ppm")
+
+```
+
+The boxplots above show that the variables differ by occupancy status, suggesting evidence that a relationship and variable might be useful in our classifier. 
+
+* CO2 has a significant increase when occupied is true, showing that CO2 is a strong predictor for occupancy.
+
+* Temperature has a higher average in occupied rooms, and has less variability. 
+
+* Humidity less significant relationship compared to other variables, as it has a lesser difference between being occupied and vacant.
+
+Overall, CO2, temperature, and time of day appear most significant in a relationship with occupancy.
+
+\newpage
+
+## EDA on relationships between type and the categorical variable
+To explore the relationship between Occupancy and a categorical predictor, I looked at conditional proportions of Occupancy, conditioned on the levels of the categorical variable.
+
+```{r}
+round(prop.table(table(occupancy_train$Occupancy, occupancy_train$Hour),
+    margin = 2), 2)
+```
+
+
+
+A barplot:
+
+
+```{r}
+barplot( round(
+  prop.table(
+    table(occupancy_train$Occupancy, occupancy_train$Hour),
+    margin = 2), 2)
+  , beside=TRUE,
+  main = "Proportional Barplot of Room Occupancy, by hour")
+
+```
+
+Based off above summaries, the closer towards the middle the day, the higher likelihood of occupancy of a room.
+
+\newpage
+## Some visual EDA on classification pairs
+
+Finally, I inspect pairs of quantitative predictors as classifiers, through a pairs plot:
+\newline
+
+```{r}
+pairs(occupancy_train[ , c("Temperature", "Humidity", "CO2")],
+      col = ifelse(occupancy_train$Occupancy == 1, "red", "black"),
+      pch = 1,
+      main = "Pairs plot of predictors colored by Occupancy (R = red, not R = black)")
+
+```
+
+While the pairs plot above shows some relationships with no reasonable separation such as Temperature vs. Humidity, CO2 as a strong discriminator between occupied (red) and unoccupied (black) in its relationship with Temperature and Humidity. Occupied rooms tend to cluster at higher CO2 levels (>1000 ppm), while unoccupied rooms mostly fall below that. This suggests CO2 is likely to be a dominant predictor in any classifier.
+
+Furthermore, the outliers of unoccupied observations with noticeably high CO2 levels (Temperature vs CO2 and Humidity vs CO2 on the very right) are potentially impactful
+
+But, since I have only looked at single or pairs of variables, there may be a more complex relationship in higher-dimensional spaces between these variables.
+
+
+
+# Modeling
+Now, I start building and assessing classifiers to predict room occupancy status. This project will contain the four following classifier types: Linear Discriminant Analysis (LDA), Quadratic Discriminant Analysis (QDA), Classification Trees, and Binary Logistic Regression.
+
+Furthermore, to prevent classifiers from overfitting, I will test them to a separate set and compare their performance with the training set. Each model is trained on the same observations (occupancy_train) and checked on the same test set (occupancy_test).
+
+\newpage
+## Linear Discriminant Analysis (LDA)
+To fulfill the assumptions of LDA, I can only use the continuous predictors (Temperature, Humidity, and CO2). The LDA classifier built from the training data is below:
+
+```{r}
+occupancy.qda <- qda(factor(Occupancy) ~ Temperature + Humidity + CO2,
+                     data = occupancy_train)
+```
+
+Upon building the classifier, we check it using our test set:
+```{r}
+occupancy.qda.pred <- predict(occupancy.qda,
+                              as.data.frame(occupancy_test))
+table(occupancy.qda.pred$class, occupancy_test$Occupancy)
+```
+
+Applying LDA upon the test set returns an error rate of (98+83)/2443 = 0.074, which is decently low. The model is better at identifying vacant rooms than occupied ones, with detecting unoccupied rooms having an error rate of 83/(1834+83) = 0.043, lower than the error rate for classifying occupied rooms, being 98/(428+98) = 0.186.
+
+## Quadratic Discriminant Analysis (QDA)
+
+Now, I'm going to fit a QDA classifier with the same quantitative predictors:
+
+```{r}
+occupancy.qda <- qda(factor(Occupancy) ~ Temperature + Humidity + CO2,
+                     data = occupancy_train)
+```
+
+Now, checking the classifier with the test dataset:
+```{r}
+occupancy.qda.pred <- predict(occupancy.qda,
+                              as.data.frame(occupancy_test))
+table(occupancy.qda.pred$class, occupancy_test$Occupancy)
+
+```
+The results for the QDA on the test data gave an overall error rate of (98+83)/2443 = 0.074, which is the same as LDA. Once again, the classifier is stronger at identifying unoccupied rooms, with an error rate of 83/(1834+83) = 0.043. The error rate for correctly classifying occupied rooms is 98/(428+98) = 0.186.
+Similar to the LDA, the QDA is significantly better at identifying unoccupied rooms, there's no noticeable improvement in overall accuracy for this dataset.
+
+\newpage
+## Classification Trees
+To account for the categorical variable "Hour", I fit and plot a classification tree:
+
+```{r}
+occupancy.tree <- rpart(factor(Occupancy) ~ Temperature + Humidity + CO2 + factor(Hour),
+                        data = occupancy_train,
+                        method = "class")
+
+rpart.plot(occupancy.tree,
+           type = 2,
+           clip.right.labs = FALSE,
+           branch = 0.3,
+           under = TRUE)
+```
+From the plot, the “most important” variable that the tree has picked for classification (at the very top) is CO2 level, followed by humidity and hour. These are picked by the tree as the most important predictor variables
+
+Now, like I did with the previous classifiers, I evaluate the tree on test data:
+
+```{r}
+occupancy.tree.pred <- predict(occupancy.tree,
+                               as.data.frame(occupancy_test),
+                               type = "class")
+
+table(occupancy.tree.pred, occupancy_test$Occupancy)
+```
+
+The results for the test data above shows that the classification tree gave an overall error rate of (32 + 17) / 2443 = 0.020, which is significantly lower than the error of both the LDA and QDA. The tree is slightly better at identifying unoccupied rooms (having an error rate of 17/(1900+17) = 0.009), compared to the error rate for correctly classifying occupied rooms (32/(494+32) = 0.061).
+
+When compared to the tests for LDA and QDA classifiers, the results for the tree signify that it has greater accuracy, and has more balance between detecting unoccupied and occupied rooms. 
+
+\newpage
+## Binary Logistic Regression
+Finally, I fit a binary logistic regression model to classify room occupancy using all predictors: 
+
+```{r}
+occupancy.logit <- glm(factor(Occupancy) ~ Temperature + Humidity + CO2 + factor(Hour),
+                       data = occupancy_train,
+                       family = binomial(link = "logit"))
+```
+
+Using test data:
+```{r}
+occupancy.logit.prob <- predict(occupancy.logit,
+                                as.data.frame(occupancy_test),
+                                type = "response")
+```
+
+Since the model returns probabilities in percents by default, we make a slight change by setting probabilities greater than 0.5 as 1 and anything else as 0. Then, I made a confusion matrix to find errors like with all other classifiers.
+
+```{r}
+occupancy.logit.pred <- ifelse(occupancy.logit.prob > 0.5, "1", "0")
+table(occupancy.logit.pred, occupancy_test$Occupancy)
+```
+The test data shows that the logistic regression classifier has an overall error rate of (44+46)/2443 = 0.037, which is higher than that of the classification tree but still reasonable. It performs slightly better at identifying unoccupied rooms, with an error rate of 46/(1871+46) = 0.024. The error rate for classifying occupied rooms is 44/(482+44) = 0.084.
+
+This indicates that the binary logistic model is better at correctly identifying unoccupied rooms than occupied ones.
+
+## Final Recommendation
+Out of all four classifiers, the **classification tree** had the best overall performance, as it had the lowest overall error rate of 0.02 on the test set. Furthermore, it had balanced error rate between both occupied and vacant rooms, especially compared to the other models.
+
+Coming after the classification tree, the binary logistic regression classifier did well as well, having an overall error rate of 0.037. The "worst" or least performing classifiers were LDA and QDA, which both had an overall error rate of 0.074.
+
+My final recommendation is the classification tree, due to the low misclassification error and significantly smaller error rates compared to other classifiers. But, due to the high likelihood of overfitting the data, pruning or some other prevention measure is strongly encouraged. 
+
+# Discussion
+The big picture of the project was that nearly all models were effective at classifying room occupancy based on various variables such as CO2, temperature, humidity, and hour of the day, since all error rates for all classifications kept under 10%. 
+Out of all variables, CO2 levels was shown to be the most informative/important, with the classification tree picking it as the first "decision". This works out logically as well, as CO2 levels arise when humans breathe in the oxygen of a room.
+
+Despite the well fitting model, there are still a number of key concerns, such as the imbalance between the vacant rooms (80% of the training data) and the occupied rooms. 
+
+* Furthermore, CO2 levels could be affected by door opening, even if the room wasn't occupied. Given this, it could lead to more variables that can make up for it, such as categorical variables including volume to detect conversation or any sort of commotion caused by movement.
+
+In any sort of modern building, improving classification of occupancy is critical in reducing energy usage, as it helps building owners conserve resources yet also uses less energy, benefitting the environment. While the models presented in this project today may not cover all factors, they provide a base for future expansion.
